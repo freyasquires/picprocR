@@ -1,0 +1,8 @@
+cyl_n,startdate,enddate,mpv,co2_cal_ppm,ch4_cal_ppb,comment
+CB09892,01/01/2018 00:00,13/02/2022 00:00,1,438.2577,1870.19,noaa
+804308,01/01/2018 00:00,13/02/2022 00:00,3,408,1794,UEA-concs not known accurately
+804309,01/01/2018 00:00,13/02/2022 00:00,2,407,1799,UEA-concs not known accurately
+D486350,13/02/2022 00:00,01/01/2024 00:00,1,389.38,1792.86,UEA - calibrated by Empa 2021
+D486348,13/02/2022 00:00,01/01/2024 00:00,2,450.58,1996.46,UEA - calibrated by Empa 2021
+D486353,13/02/2022 00:00,01/01/2024 00:00,3,405.06,1833.88,UEA - calibrated by Empa 2021
+D486349,,,,426.34,1884.52,UEA - calibrated by Empa 2021. Not been installed yet. 

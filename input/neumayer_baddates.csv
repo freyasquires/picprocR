@@ -1,0 +1,7 @@
+startdate,enddate,comment
+16/03/2021,17/03/2021,Picarro scheduler issue
+20/06/2021,28/06/2021,Water measurement problem - software glitch
+12/08/2021,16/08/2021,"Power failure, no data recorded."
+04/09/2021,27/10/2021,Leaks or pressure problems.
+20/11/2021,20/11/2021,Nafion drier testing testing.
+20/03/2022,07/05/2022,"Scheduler corrupted, triggered too many calibrations"
