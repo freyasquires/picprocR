@@ -130,7 +130,7 @@ safer_read_picarro_data_worker <- purrr::possibly(read_picarro_data_worker,
 #create a time series to join to (irregular time series in Picarro data)
 pad_ts <- function(df, datecol, interval){
   
-  ts <- df[,datecol]
+  ts <- df[[datecol]] #changed this 08/12/23 - not sure why this has stopped working? Maybe tbl vs df???
   padded_ts <- seq(min(ts, na.rm = T), max(ts, na.rm = T), interval)
   
   padded_ts <- data.frame(padded_ts)
