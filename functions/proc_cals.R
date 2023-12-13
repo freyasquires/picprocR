@@ -108,14 +108,15 @@ calc_cal_factors <- function(cal, cylinder_info, fn, z_score_threshold = 3,
   # Calculate scaling factor - divide measured value by cylinder value
     co2_sf_df <- cal %>% 
       mutate(estimate_co2_intercept = 0,
-             estimate_co2_slope = CO2cal_dry/co2_cal_ppm,
+             co2_slope = CO2cal_dry/co2_cal_ppm,
+             estimate_co2_slope = NA,
              std.error_co2_intercept = NA,
              std.error_co2_slope = NA,
              statistic_co2_intercept = NA,
              statistic_co2_slope = NA,
              p.value_co2_intercept = NA,
              p.value_co2_slope = NA,
-             z_score_slope = (estimate_co2_slope-mean(estimate_co2_slope))/sd(estimate_co2_slope),
+             z_score_slope = NA,
              z_score_int = NA,
              z_score_thresh = z_score_threshold) %>% 
       select(date,
@@ -131,19 +132,32 @@ calc_cal_factors <- function(cal, cylinder_info, fn, z_score_threshold = 3,
              z_score_slope,
              z_score_int,
              z_score_thresh,
+             co2_slope,
              cyl_n
              )
     
+    # Average the slopes calculated for each cylinder - average per filedate
+    # These will be used to create cal interp if using this method, but want to 
+    # plot individual cylinders too.
+    # Don't want to use cylinder CB09892 - pressure is too low to trust 
+    
+    co2_sf_df <- co2_sf_df %>% 
+      group_by(filedate) %>% 
+      mutate(estimate_co2_slope = mean(co2_slope[cyl_n != "CB09892"])) %>% 
+      ungroup() %>% 
+      mutate(z_score_slope = (estimate_co2_slope-mean(estimate_co2_slope))/sd(estimate_co2_slope))
+    
     ch4_sf_df <- cal %>% 
       mutate(estimate_ch4_intercept = 0,
-             estimate_ch4_slope = CH4cal_dry*1000/ch4_cal_ppb,
+             ch4_slope = CH4cal_dry*1000/ch4_cal_ppb,
+             estimate_ch4_slope = NA,
              std.error_ch4_intercept = NA,
              std.error_ch4_slope = NA,
              statistic_ch4_intercept = NA,
              statistic_ch4_slope = NA,
              p.value_ch4_intercept = NA,
              p.value_ch4_slope = NA,
-             z_score_slope = (estimate_ch4_slope-mean(estimate_ch4_slope))/sd(estimate_ch4_slope),
+             z_score_slope = NA,
              z_score_int = NA,
              z_score_thresh = z_score_threshold) %>% 
       select(date,
@@ -159,8 +173,16 @@ calc_cal_factors <- function(cal, cylinder_info, fn, z_score_threshold = 3,
              z_score_slope,
              z_score_int,
              z_score_thresh,
-             cyl_n
+             cyl_n,
+             ch4_slope
       )
+    
+    ch4_sf_df <- ch4_sf_df %>% 
+      group_by(filedate) %>% 
+      mutate(estimate_ch4_slope = mean(ch4_slope[cyl_n != "CB09892"])) %>% 
+      ungroup() %>% 
+      mutate(z_score_slope = (estimate_ch4_slope-mean(estimate_ch4_slope))/sd(estimate_ch4_slope))
+    
   }
 
   #plot cal factor data ------------
@@ -303,21 +325,55 @@ calc_cal_factors <- function(cal, cylinder_info, fn, z_score_threshold = 3,
   
   if(cal_method == "target"){
     co2_slope <- ggplot(co2_sf_df) + 
-      geom_point(aes(date, estimate_co2_slope, colour = cyl_n)) + 
+      geom_point(aes(date, co2_slope, colour = cyl_n)) + 
       ylab(parse(text = "`CO2 Slope (targets)`")) + 
       scale_x_datetime(date_labels = "%d/%m/%Y") +
       theme_bw() + 
       theme(axis.title.x = element_blank())
     
     ch4_slope <- ggplot(ch4_sf_df) +
-      geom_point(aes(date, estimate_ch4_slope, colour = cyl_n)) + 
+      geom_point(aes(date, ch4_slope, colour = cyl_n)) + 
       ylab(parse(text = "`CH4 Slope (targets)`")) + 
       scale_x_datetime(date_labels = "%d/%m/%Y") +
       theme_bw() + 
       theme(axis.title.x = element_blank())
     
+    co2_slope2 <- ggplot(co2_sf_df) + 
+      geom_point(aes(date, co2_slope, colour = cyl_n)) + 
+      ylab(parse(text = "`CO2 Slope (targets)`")) + 
+      scale_x_datetime(date_labels = "%d/%m/%Y") +
+      ylim(c(0.995, 1.005)) +
+      theme_bw() + 
+      theme(axis.title.x = element_blank())
+    
+    ch4_slope2 <- ggplot(ch4_sf_df) +
+      geom_point(aes(date, ch4_slope, colour = cyl_n)) + 
+      ylab(parse(text = "`CH4 Slope (targets)`")) + 
+      scale_x_datetime(date_labels = "%d/%m/%Y") +
+      ylim(c(0.995, 1.005)) +
+      theme_bw() + 
+      theme(axis.title.x = element_blank())
+    
+    co2_slope_av <- ggplot(co2_sf_df) + 
+      geom_point(aes(date, estimate_co2_slope)) + 
+      ylab(parse(text = "`Average CO2 Slope (targets)`")) + 
+      scale_x_datetime(date_labels = "%d/%m/%Y") +
+      ylim(c(0.995, 1.005)) +
+      theme_bw() + 
+      theme(axis.title.x = element_blank())
+    
+    ch4_slope_av <- ggplot(ch4_sf_df) +
+      geom_point(aes(date, estimate_ch4_slope)) + 
+      ylab(parse(text = "`Average CH4 Slope (targets)`")) + 
+      scale_x_datetime(date_labels = "%d/%m/%Y") +
+      ylim(c(0.995, 1.005)) +
+      theme_bw() + 
+      theme(axis.title.x = element_blank())
+    
     pdf(file = paste0(out, fn, "_cal_plots.pdf"), width = 7.5, height = 11, paper = "a4")
     print(ggpubr::ggarrange(co2_slope, ch4_slope, ncol = 1, align = "v"))
+    print(ggpubr::ggarrange(co2_slope2, ch4_slope2, ncol = 1, align = "v"))
+    print(ggpubr::ggarrange(co2_slope_av, ch4_slope_av, ncol = 1, align = "v"))
     dev.off()
     
   }
@@ -327,8 +383,8 @@ calc_cal_factors <- function(cal, cylinder_info, fn, z_score_threshold = 3,
     return(list(co2_cal_factors = co2_lm_df, ch4_cal_factors = ch4_lm_df))
     
   }else if(cal_method == "target"){
-      return(list(co2_cal_factors = co2_sf_df %>% select(-cyl_n), 
-                  ch4_cal_factors = ch4_sf_df %>% select(-cyl_n)))
+      return(list(co2_cal_factors = co2_sf_df, 
+                  ch4_cal_factors = ch4_sf_df))
     
     }else if (cal_method == "fixed"){
         return(list(co2_cal_factors = co2_fixed_values, ch4_cal_factors = ch4_fixed_values))
@@ -365,15 +421,16 @@ flag_cals <- function(cal_list, baddates_csv_fp, fn, cal_method){
         map(~mutate_at(.x, vars(6), list(badflag = ~ifelse(. >1, 1, badflag)))) %>% 
         map(~mutate_at(.x, vars(5), list(badflag = ~ifelse(is.na(.), 1, badflag)))) %>% 
         map(~mutate_at(.x, vars(6), list(badflag = ~ifelse(is.na(.), 1, badflag)))) %>% 
-        map(~mutate(.x, list(badflag = ~ifelse(z_score_int > z_score_thresh, 1, badflag)))) %>% 
-        map(~mutate(.x, list(badflag = ~ifelse(z_score_slope > z_score_thresh, 1, badflag))))
+        map(~mutate_at(.x, vars(11), list(badflag = ~ifelse(abs(.) > z_score_thresh, 1, badflag)))) %>% 
+        map(~mutate_at(.x, vars(12), list(badflag = ~ifelse(abs(.) > z_score_thresh, 1, badflag))))
       
     } else if (cal_method == "target") {
       # Havent't got standard error for fit so for now just flag on Z score.
+      # Don't calculate an intercept so just use slope
       
       cal_list <- cal_list %>% 
-        map(~mutate(.x, list(badflag = ~ifelse(z_score_int > z_score_thresh, 1, badflag)))) %>% 
-        map(~mutate(.x, list(badflag = ~ifelse(z_score_slope > z_score_thresh, 1, badflag))))
+        map(~mutate_at(.x, vars(11), list(badflag = ~ifelse(abs(.) > z_score_thresh, 1, badflag)))) 
+      
     }
     
     # Remove any additional problem dates (where instrument was reported as not
@@ -548,44 +605,44 @@ scale_data <- function(dat, cal_interp_list, scaled_file_dir, cal_method){
     }
     
     # Apply the calibration
-    df_j$co2_scaled <- (df_j$CO2_dry/df_j$co2_slope)-df_j$co2_int
-    df_j$ch4_scaled <- (df_j$CH4_dry/df_j$ch4_slope)-(df_j$ch4_int/1000)
+    df_j$co2_scaled <- (df_j$CO2_dry-df_j$co2_int)/df_j$co2_slope
+    df_j$ch4_scaled <- (df_j$CH4_dry-(df_j$ch4_int/1000))/df_j$ch4_slope
     
     # Average the concentration values to 1 minute means
-    df_1min <- df_j %>% 
-      select(date, 
+    df_1min <- df_j %>%
+      select(date,
              CO2_dry,
              CH4_dry,
              co2_scaled,
-             ch4_scaled) %>% 
-      mutate(date = floor_date(date, "minute")) %>% 
-      group_by(date) %>% 
+             ch4_scaled) %>%
+      mutate(date = floor_date(date, "minute")) %>%
+      group_by(date) %>%
       summarise_all(mean, na.rm = T)
 
     # Take the max value of the flags in that minute
-    df_1min_f <- df_j %>% 
+    df_1min_f <- df_j %>%
       select(date,
-             badflag) %>% 
-      mutate(date = floor_date(date, "minute")) %>% 
-      group_by(date) %>% 
+             badflag) %>%
+      mutate(date = floor_date(date, "minute")) %>%
+      group_by(date) %>%
       summarise_all(max, na.rm = T)
-    
-    # Take the modal value for cal flag and valve state 
-    df_1min_calf <- df_j %>% 
+
+    # Take the modal value for cal flag and valve state
+    df_1min_calf <- df_j %>%
       select(date,
              calflag,
-             mpv) %>% 
-      mutate(date = floor_date(date, "minute")) %>% 
-      group_by(date) %>% 
+             mpv) %>%
+      mutate(date = floor_date(date, "minute")) %>%
+      group_by(date) %>%
       summarise_all(getmode)
-    
+
     # Add the flags back to the data
-    df_1min <- df_1min %>% 
-      left_join(df_1min_f, 
-                "date") %>% 
-      left_join(df_1min_calf, 
+    df_1min <- df_1min %>%
+      left_join(df_1min_f,
+                "date") %>%
+      left_join(df_1min_calf,
                 "date")
-    
+
     write.csv(df_1min, paste0(scaled_file_dir, filename), row.names = F)
     
     dat_scaled[[i]] <- df_1min
