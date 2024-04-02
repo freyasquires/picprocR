@@ -140,12 +140,15 @@ calc_cal_factors <- function(cal, cylinder_info, fn, z_score_threshold = 3,
     # These will be used to create cal interp if using this method, but want to 
     # plot individual cylinders too.
     # Don't want to use cylinder CB09892 - pressure is too low to trust 
+    # Omit cals that are 0 from the average
     
     co2_sf_df <- co2_sf_df %>% 
+      mutate(co2_slope = ifelse(co2_slope < 0.95, NA, co2_slope),
+             co2_slope = ifelse(co2_slope > 1.05, NA, co2_slope)) %>% 
       group_by(filedate) %>% 
-      mutate(estimate_co2_slope = mean(co2_slope[cyl_n != "CB09892"])) %>% 
+      mutate(estimate_co2_slope = mean(co2_slope[cyl_n != "CB09892"], na.rm = T)) %>% 
       ungroup() %>% 
-      mutate(z_score_slope = (estimate_co2_slope-mean(estimate_co2_slope))/sd(estimate_co2_slope))
+      mutate(z_score_slope = (estimate_co2_slope-mean(estimate_co2_slope, na.rm = T))/sd(estimate_co2_slope, na.rm = T))
     
     ch4_sf_df <- cal %>% 
       mutate(estimate_ch4_intercept = 0,
@@ -178,10 +181,12 @@ calc_cal_factors <- function(cal, cylinder_info, fn, z_score_threshold = 3,
       )
     
     ch4_sf_df <- ch4_sf_df %>% 
+      mutate(ch4_slope = ifelse(ch4_slope < 0.95, NA, ch4_slope),
+             ch4_slope = ifelse(ch4_slope > 1.05, NA, ch4_slope)) %>% 
       group_by(filedate) %>% 
-      mutate(estimate_ch4_slope = mean(ch4_slope[cyl_n != "CB09892"])) %>% 
+      mutate(estimate_ch4_slope = mean(ch4_slope[cyl_n != "CB09892"], na.rm = T)) %>% 
       ungroup() %>% 
-      mutate(z_score_slope = (estimate_ch4_slope-mean(estimate_ch4_slope))/sd(estimate_ch4_slope))
+      mutate(z_score_slope = (estimate_ch4_slope-mean(estimate_ch4_slope, na.rm = T))/sd(estimate_ch4_slope, na.rm = T))
     
   }
 
@@ -425,11 +430,17 @@ flag_cals <- function(cal_list, baddates_csv_fp, fn, cal_method){
         map(~mutate_at(.x, vars(12), list(badflag = ~ifelse(abs(.) > z_score_thresh, 1, badflag))))
       
     } else if (cal_method == "target") {
-      # Havent't got standard error for fit so for now just flag on Z score.
-      # Don't calculate an intercept so just use slope
       
-      cal_list <- cal_list %>% 
-        map(~mutate_at(.x, vars(11), list(badflag = ~ifelse(abs(.) > z_score_thresh, 1, badflag)))) 
+      # Haven't got standard error for fit so for now just flag on Z score.
+      # Don't calculate an intercept so just use slope
+      # Flag for low slope values - these have been calculated using bad data, 
+      # not captured by other methods. Need to improve on this in future.
+      
+      cal_list <- cal_list %>%
+        map(~mutate_at(.x, vars(11), list(badflag = ~ifelse(abs(.) > z_score_thresh, 1, badflag)))) %>%
+        map(~mutate_at(.x, vars(4), list(badflag = ~ifelse(. < 0.9, 1, badflag)))) %>%
+        map(~mutate_at(.x, vars(4), list(badflag = ~ifelse(. > 1.1, 1, badflag)))) %>% 
+        map(~mutate_at(.x, vars(4), list(badflag = ~ifelse(is.na(.), 1, badflag))))
       
     }
     
@@ -453,22 +464,30 @@ flag_cals <- function(cal_list, baddates_csv_fp, fn, cal_method){
       map(~mutate(.x, badflag = ifelse(filedate %in% baddates, 1, badflag))) %>% 
       map(~mutate(.x, badflag = ifelse(is.na(badflag), 1, badflag)))
     
-    # Flag early 2022 cals where things weren't set up
-    cal2022_problems <- seq(ymd("2022-01-01"), ymd("2022-05-07"),
-                            by = "1 day")
+    # Write files to .csv (target cals have extra column because of inclusion of
+    # none averaged slope)
     
-    cal_list <- cal_list %>% 
-      map(~mutate(.x, badflag = ifelse(filedate %in% cal2022_problems, 1, badflag))) 
-    
-    # Output the calibration results as a csv
-    write.csv(cal_list[['co2_cal_factors']][1:14], 
+    if(cal_method %in% c("linear", "fixed")){
+      write.csv(cal_list[['co2_cal_factors']][1:14], 
               file = paste0(out, fn, "_cal_factors_co2.csv"), 
               row.names = F)
+      
+      write.csv(cal_list[['ch4_cal_factors']][1:14], 
+                file = paste0(out, fn, "_cal_factors_ch4.csv"), 
+                row.names = F)
+    }
     
-    write.csv(cal_list[['ch4_cal_factors']][1:14], 
-              file = paste0(out, fn, "_cal_factors_ch4.csv"), 
-              row.names = F)
-    
+    if(cal_method == "target"){
+      # Output the calibration results as a csv
+      write.csv(cal_list[['co2_cal_factors']][1:15], 
+                file = paste0(out, fn, "_cal_factors_co2.csv"), 
+                row.names = F)
+      
+      write.csv(cal_list[['ch4_cal_factors']][1:15], 
+                file = paste0(out, fn, "_cal_factors_ch4.csv"), 
+                row.names = F)
+    }
+   
     return(cal_list)
     
   }
@@ -499,16 +518,24 @@ interp_cal_series <- function(cal_list_f, dat, cal_method){
     # Create a timeseries of CO2 cal factors
     co2_cal_interp <- cal_list_f[['co2_cal_factors']][1:14]
     
-    # Add the first date from dat so interpolation happens for entire time series
-    co2_cal_interp <- co2_cal_interp %>% add_row(date = dat[[1]]$date[1], 
-                                                 filedate = ymd(substr(names(dat[1]), 14, 21)),
-                                                 .before = 1)
+    # If first date from dat happens before first cal date add that date, 
+    # so interpolation happens for entire time series
+    
+    if(co2_cal_interp$date[1] > dat[[1]]$date[1]){
+      
+      co2_cal_interp <- co2_cal_interp %>% add_row(date = dat[[1]]$date[1], 
+                                                   filedate = ymd(substr(names(dat[1]), 14, 21)),
+                                                   .before = 1)
+    }
+    
     
     # And at the end...
+    if(co2_cal_interp$date[nrow(co2_cal_interp)] < dat[[length(dat)]]$date[nrow(dat[[length(dat)]])]){
+      
     co2_cal_interp <- co2_cal_interp %>% add_row(date = dat[[length(dat)]]$date[nrow(dat[[length(dat)]])], 
                                                  filedate = ymd(substr(names(dat[length(dat)]), 14, 21)),
                                                  .after = nrow(co2_cal_interp))
-    
+    }
     # Pad and interpolate
     co2_cal_interp <- pad_ts(co2_cal_interp, datecol = "date", interval = 1)
     gc()
@@ -538,15 +565,21 @@ interp_cal_series <- function(cal_list_f, dat, cal_method){
     #CH4
     ch4_cal_interp <- cal_list_f[['ch4_cal_factors']][1:14]
     
-    # Add the first date from dat so interpolation happens for entire time series
+    # Check dates so interpolation happens for entire time series
+    if(ch4_cal_interp$date[1] > dat[[1]]$date[1]){
+    
     ch4_cal_interp <- ch4_cal_interp %>% add_row(date = dat[[1]]$date[1], 
                                                  filedate = ymd(substr(names(dat[1]), 14, 21)),
                                                  .before = 1)
+    }
     
     # And at the end...
+    if(ch4_cal_interp$date[nrow(ch4_cal_interp)] < dat[[length(dat)]]$date[nrow(dat[[length(dat)]])]){
+      
     ch4_cal_interp <- ch4_cal_interp %>% add_row(date = dat[[length(dat)]]$date[nrow(dat[[length(dat)]])], 
                                                  filedate = ymd(substr(names(dat[length(dat)]), 14, 21)),
                                                  .after = nrow(ch4_cal_interp))
+    }
     
     ch4_cal_interp <- pad_ts(ch4_cal_interp, datecol = "date", interval = 1)
     gc()
@@ -612,9 +645,17 @@ scale_data <- function(dat, cal_interp_list, scaled_file_dir, cal_method){
     df_1min <- df_j %>%
       select(date,
              CO2_dry,
+             CO2_wet,
              CH4_dry,
+             CH4_wet,
              co2_scaled,
-             ch4_scaled) %>%
+             ch4_scaled,
+             H2O,
+             co2_slope,
+             co2_int,
+             ch4_slope,
+             ch4_int
+             ) %>%
       mutate(date = floor_date(date, "minute")) %>%
       group_by(date) %>%
       summarise_all(mean, na.rm = T)
