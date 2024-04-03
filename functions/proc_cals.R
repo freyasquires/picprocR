@@ -2,7 +2,7 @@
 # Outputs pdf of calibration values
 
 calc_cal_factors <- function(cal, cylinder_info, fn, z_score_threshold = 3,
-                             cal_method){
+                             cal_method, baddates_csv_fp){
 
   # Read in cylinder information .csv
   
@@ -21,6 +21,25 @@ calc_cal_factors <- function(cal, cylinder_info, fn, z_score_threshold = 3,
                     by = "mpv", 
                     relationship = "many-to-many") %>% 
     filter(between(date, startdate, enddate))
+  
+  # Make values nan where dates appear in 'baddates' file so bad data isn't used
+  # to calculate cal slopes
+  bd <- read.csv(baddates_csv_fp) %>% 
+    mutate(startdate = dmy(startdate),
+           enddate = dmy(enddate))
+  
+  # Create a sequence of dates
+  bd <- bd %>% 
+    mutate(baddates = map2(startdate, enddate, ~seq(.x, .y, by = "1 day")))
+  
+  baddates <- bd$baddates %>% 
+    unlist() %>% 
+    as_date()
+  
+  # Flag cals based on baddates and if flag is NaN. 
+  cal <- cal %>% 
+    mutate(CO2cal_dry = ifelse(filedate %in% baddates, NA, CO2cal_dry)) %>% 
+    mutate(CH4cal_dry = ifelse(filedate %in% baddates, NA, CH4cal_dry))
   
   # Calculate the cal factors to be applied - calculation different depending 
   # on method
@@ -94,13 +113,13 @@ calc_cal_factors <- function(cal, cylinder_info, fn, z_score_threshold = 3,
     # is 3.
     
     co2_lm_df <- co2_lm_df %>% 
-      mutate(z_score_slope = (estimate_co2_slope-mean(estimate_co2_slope))/sd(estimate_co2_slope),
-             z_score_int = (estimate_co2_intercept-mean(estimate_co2_intercept))/sd(estimate_co2_intercept),
+      mutate(z_score_slope = (estimate_co2_slope-mean(estimate_co2_slope, na.rm = T))/sd(estimate_co2_slope, na.rm = T),
+             z_score_int = (estimate_co2_intercept-mean(estimate_co2_intercept, na.rm = T))/sd(estimate_co2_intercept, na.rm = T),
              z_score_thresh = z_score_threshold)
     
     ch4_lm_df <- ch4_lm_df %>% 
-      mutate(z_score_slope = (estimate_ch4_slope-mean(estimate_ch4_slope))/sd(estimate_ch4_slope),
-             z_score_int = (estimate_ch4_intercept-mean(estimate_ch4_intercept))/sd(estimate_ch4_intercept),
+      mutate(z_score_slope = (estimate_ch4_slope-mean(estimate_ch4_slope, na.rm = T))/sd(estimate_ch4_slope, na.rm = T),
+             z_score_int = (estimate_ch4_intercept-mean(estimate_ch4_intercept, na.rm = T))/sd(estimate_ch4_intercept, na.rm = T),
              z_score_thresh = z_score_threshold)
   }
   
@@ -412,6 +431,26 @@ flag_cals <- function(cal_list, baddates_csv_fp, fn, cal_method){
     cal_list <- cal_list %>% 
       map(~mutate(.x, badflag = 0))
     
+    # # Remove any additional problem dates (where instrument was reported as not
+    # # working properly so bad values are not included in the cal slopes)
+    # 
+    # bd <- read.csv(baddates_csv_fp) %>% 
+    #   mutate(startdate = dmy(startdate),
+    #          enddate = dmy(enddate))
+    # 
+    # # Create a sequence of dates
+    # bd <- bd %>% 
+    #   mutate(baddates = map2(startdate, enddate, ~seq(.x, .y, by = "1 day")))
+    # 
+    # baddates <- bd$baddates %>% 
+    #   unlist() %>% 
+    #   as_date()
+    # 
+    # # Flag cals based on baddates and if flag is NaN. 
+    # cal_list <- cal_list %>% 
+    #   map(~mutate(.x, badflag = ifelse(filedate %in% baddates, 1, badflag))) %>% 
+    #   map(~mutate(.x, badflag = ifelse(is.na(badflag), 1, badflag)))
+    
     if(cal_method == "linear"){
       # Filter cals based on Z value and standard error
       # If intercept standard error is greater than 50, flag
@@ -444,25 +483,6 @@ flag_cals <- function(cal_list, baddates_csv_fp, fn, cal_method){
       
     }
     
-    # Remove any additional problem dates (where instrument was reported as not
-    # working properly so bad values are not included in the cal slopes)
-    
-    bd <- read.csv(baddates_csv_fp) %>% 
-      mutate(startdate = dmy(startdate),
-             enddate = dmy(enddate))
-    
-    # Create a sequence of dates
-    bd <- bd %>% 
-      mutate(baddates = map2(startdate, enddate, ~seq(.x, .y, by = "1 day")))
-    
-    baddates <- bd$baddates %>% 
-      unlist() %>% 
-      as_date()
-    
-    # Flag cals based on baddates and if flag is NaN. 
-    cal_list <- cal_list %>% 
-      map(~mutate(.x, badflag = ifelse(filedate %in% baddates, 1, badflag))) %>% 
-      map(~mutate(.x, badflag = ifelse(is.na(badflag), 1, badflag)))
     
     # Write files to .csv (target cals have extra column because of inclusion of
     # none averaged slope)
